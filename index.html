@@ -930,7 +930,7 @@
             <div id="redactModeUI" class="hidden">
                 <div class="upload-area" id="uploadArea">
                     <div class="upload-card-title">上传待脱敏文件</div>
-                    <div class="upload-card-desc">点击选择或拖拽 `.docx` 文件到此处，系统会自动解析并识别可脱敏内容。</div>
+                    <div class="upload-card-desc">点击选择 `.docx` 文件到此处，系统会自动解析并识别可脱敏内容。</div>
                     <div class="upload-card-meta">DOCX ONLY</div>
                 </div>
                 <input type="file" id="fileInput" accept=".docx">
@@ -996,7 +996,7 @@
                     </div>
                     <div class="upload-area" id="mappingUploadArea">
                         <div class="upload-card-title">上传比对词映射</div>
-                        <div class="upload-card-desc">点击或拖拽上传 `.md` 或 `.txt` 文件，用于将脱敏占位符还原为原文。</div>
+                        <div class="upload-card-desc">点击上传 `.md` 或 `.txt` 文件，用于将脱敏占位符还原为原文。</div>
                         <div class="upload-card-meta">STEP 2</div>
                     </div>
                 </div>
@@ -1070,13 +1070,7 @@
                 <label><input type="checkbox" id="exportDocx" checked>脱敏文件 `.docx`</label>
                 <label><input type="checkbox" id="exportMapping" checked>替换比对 `.md`（用于还原）</label>
             </div>
-            <p style="margin-top:16px;">请选择导出位置：</p>
-            <div class="checkbox-list horizontal" style="margin-top:15px;" id="exportModeList">
-                <label id="exportModePickerLabel"><input type="radio" name="exportMode" id="exportModePicker"
-                        value="picker" checked>选择导出路径</label>
-                <label><input type="radio" name="exportMode" id="exportModeDownload" value="download">默认下载目录</label>
-            </div>
-            <div class="export-mode-hint" id="exportModeHint">优先使用系统保存对话框，不支持时自动回退到默认下载目录。</div>
+            <div class="export-mode-hint" id="exportModeHint">导出时将弹出系统保存对话框；当前环境不支持时自动导出到默认下载目录。</div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="app.hideExportModal()">取消</button>
                 <button class="btn btn-success" onclick="app.exportResults()">导出</button>
@@ -1329,6 +1323,14 @@
             return typeof window !== 'undefined' && !!window.__TAURI__;
         }
 
+        function isAndroidTauriRuntime() {
+            if (!isTauriRuntime()) {
+                return false;
+            }
+            const ua = (typeof navigator !== 'undefined' && navigator.userAgent) ? navigator.userAgent : '';
+            return /Android/i.test(ua);
+        }
+
         function isPickerSupported() {
             if (isTauriRuntime()) {
                 return !!(window.__TAURI__.dialog && typeof window.__TAURI__.dialog.save === 'function'
@@ -1338,31 +1340,21 @@
         }
 
         function updateExportModeUI() {
-            const pickerInput = document.getElementById('exportModePicker');
-            const downloadInput = document.getElementById('exportModeDownload');
-            const pickerLabel = document.getElementById('exportModePickerLabel');
             const hint = document.getElementById('exportModeHint');
 
-            if (!pickerInput || !downloadInput || !hint) {
+            if (!hint) {
                 return;
             }
 
             if (!isPickerSupported()) {
-                pickerInput.disabled = true;
-                downloadInput.checked = true;
-                if (pickerLabel) {
-                    pickerLabel.classList.add('is-disabled');
-                }
-                hint.textContent = '当前环境不支持“选择导出路径”，将导出到默认下载目录。';
+                hint.textContent = isAndroidTauriRuntime()
+                    ? '当前为 Android 应用：将调用系统分享面板进行导出保存。'
+                    : '当前环境不支持系统保存对话框，将自动导出到默认下载目录。';
                 return;
             }
 
-            pickerInput.disabled = false;
-            if (pickerLabel) {
-                pickerLabel.classList.remove('is-disabled');
-            }
             hint.textContent = isTauriRuntime()
-                ? '当前为本地应用：可在导出时手动选择保存地址。'
+                ? '当前为本地应用：导出时会打开系统保存对话框。'
                 : '当前为浏览器：支持时会弹出系统保存对话框。';
         }
 
@@ -1400,9 +1392,42 @@
             return true;
         }
 
-        function getExportMode() {
-            const selected = document.querySelector('input[name="exportMode"]:checked');
-            return selected ? selected.value : 'picker';
+        function getMimeTypeFromOptions(options = {}) {
+            const types = Array.isArray(options.types) ? options.types : [];
+            for (const item of types) {
+                const accept = item && item.accept ? item.accept : {};
+                const mime = Object.keys(accept)[0];
+                if (mime) return mime;
+            }
+            return 'application/octet-stream';
+        }
+
+        async function saveBlobByAndroidShare(blob, filename, options = {}) {
+            if (!isAndroidTauriRuntime() || !navigator.share || !window.File) {
+                return false;
+            }
+
+            const mimeType = getMimeTypeFromOptions(options);
+            const file = new File([blob], filename, { type: mimeType });
+
+            if (navigator.canShare && !navigator.canShare({ files: [file] })) {
+                return false;
+            }
+
+            try {
+                await navigator.share({
+                    title: '导出文件',
+                    text: `导出 ${filename}`,
+                    files: [file]
+                });
+                return true;
+            } catch (error) {
+                if (error && error.name === 'AbortError') {
+                    return false;
+                }
+                console.warn('Android 系统分享导出失败:', error);
+                return false;
+            }
         }
 
         async function saveBlobByTauri(blob, filename, options = {}) {
@@ -1423,8 +1448,15 @@
         }
 
         async function saveBlobWithPicker(blob, filename, options = {}) {
-            if (getExportMode() === 'download') {
-                return saveBlobByDownload(blob, filename);
+            if (isAndroidTauriRuntime()) {
+                const shared = await saveBlobByAndroidShare(blob, filename, options);
+                if (shared) {
+                    return true;
+                }
+                if (!isPickerSupported()) {
+                    alert('当前 Android 环境不支持直接下载，请使用系统分享面板保存文件。');
+                    return false;
+                }
             }
 
             if (isTauriRuntime() && isPickerSupported()) {
@@ -1569,7 +1601,11 @@
             initEvents() {
                 const uploadArea = document.getElementById('uploadArea');
                 const fileInput = document.getElementById('fileInput');
-                uploadArea.onclick = () => fileInput.click();
+                uploadArea.onclick = () => {
+                    // 允许重复选择同一文件时也触发 change
+                    fileInput.value = '';
+                    fileInput.click();
+                };
                 uploadArea.ondragover = (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); };
                 uploadArea.ondragleave = () => uploadArea.classList.remove('dragover');
                 uploadArea.ondrop = (e) => { e.preventDefault(); uploadArea.classList.remove('dragover'); if (e.dataTransfer.files[0]) this.handleFile(e.dataTransfer.files[0]); };
@@ -2432,8 +2468,19 @@
                 this.showAddModal(text);
             }
             async exportResults() {
-                if (document.getElementById('exportDocx').checked) await this.exportDocx();
-                if (document.getElementById('exportMapping').checked) await this.exportMappingMD();
+                const shouldExportDocx = document.getElementById('exportDocx').checked;
+                const shouldExportMapping = document.getElementById('exportMapping').checked;
+
+                // 在不支持系统保存对话框的环境中，两个文件连续下载可能被系统拦截其一
+                // 因此两个都勾选时合并为一个 ZIP 下载，保证一次成功导出
+                if (shouldExportDocx && shouldExportMapping && (!isPickerSupported() || isAndroidTauriRuntime())) {
+                    await this.exportCombinedZip();
+                    this.hideExportModal();
+                    return;
+                }
+
+                if (shouldExportDocx) await this.exportDocx();
+                if (shouldExportMapping) await this.exportMappingMD();
                 this.hideExportModal();
             }
 
@@ -2721,87 +2768,99 @@
             }
 
             /**
-             * 导出docx文件（处理跨runs替换，保留原格式）
+             * 获取脱敏 docx 文件名
              */
-            async exportDocx() {
-                try {
-                    const arrayBuffer = await this.file.arrayBuffer();
-                    const zip = await JSZip.loadAsync(arrayBuffer);
+            getRedactedDocxFileName() {
+                return this.file.name.replace(".docx", "_脱敏.docx");
+            }
 
-                    // 获取 document.xml
-                    let xml = await zip.file("word/document.xml").async("string");
+            /**
+             * 生成脱敏 docx Blob（处理跨runs替换，保留原格式）
+             */
+            async buildRedactedDocxBlob() {
+                const arrayBuffer = await this.file.arrayBuffer();
+                const zip = await JSZip.loadAsync(arrayBuffer);
 
-                    // 解析XML
-                    const parser = new DOMParser();
-                    const doc = parser.parseFromString(xml, "text/xml");
-                    const paragraphs = doc.getElementsByTagName("w:p");
+                // 获取 document.xml
+                let xml = await zip.file("word/document.xml").async("string");
 
-                    // 按长度降序排序redactions（长文本优先）
-                    const sortedRedactions = [...this.redactions].sort((a, b) => b.original.length - a.original.length);
+                // 解析XML
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(xml, "text/xml");
+                const paragraphs = doc.getElementsByTagName("w:p");
 
-                    // 处理每个段落
-                    for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
-                        const para = paragraphs[pIdx];
-                        const runs = para.getElementsByTagName("w:r");
+                // 按长度降序排序redactions（长文本优先）
+                const sortedRedactions = [...this.redactions].sort((a, b) => b.original.length - a.original.length);
 
-                        // 使用集合记录已处理的redaction索引
-                        const processedIndices = new Set();
+                // 处理每个段落
+                for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
+                    const para = paragraphs[pIdx];
+                    const runs = para.getElementsByTagName("w:r");
 
-                        // 策略1：先尝试单run内简单替换
-                        for (let rIdx = 0; rIdx < sortedRedactions.length; rIdx++) {
-                            const r = sortedRedactions[rIdx];
-                            const original = r.original;
-                            const replacement = r.replacement;
-                            let found = false;
+                    // 使用集合记录已处理的redaction索引
+                    const processedIndices = new Set();
 
-                            for (const run of runs) {
-                                const textNodes = run.getElementsByTagName("w:t");
-                                for (const tn of textNodes) {
-                                    const text = tn.textContent;
-                                    let pos = text.indexOf(original);
-                                    while (pos !== -1) {
-                                        // 边界检查
-                                        const before = pos > 0 ? text.charAt(pos - 1) : '';
-                                        const after = pos + original.length < text.length ? text.charAt(pos + original.length) : '';
+                    // 策略1：先尝试单run内简单替换
+                    for (let rIdx = 0; rIdx < sortedRedactions.length; rIdx++) {
+                        const r = sortedRedactions[rIdx];
+                        const original = r.original;
+                        const replacement = r.replacement;
+                        let found = false;
 
-                                        // 前后都不能是数字
-                                        if (!/\d/.test(before) && !/\d/.test(after)) {
-                                            // 检查是否在【】内（防止嵌套脱敏）
-                                            if (!this.isInRedactedBrackets(text, pos)) {
-                                                tn.textContent = text.replace(new RegExp(this.escapeRegex(original), 'g'), replacement);
-                                                found = true;
-                                                break;  // 已替换，退出循环
-                                            }
+                        for (const run of runs) {
+                            const textNodes = run.getElementsByTagName("w:t");
+                            for (const tn of textNodes) {
+                                const text = tn.textContent;
+                                let pos = text.indexOf(original);
+                                while (pos !== -1) {
+                                    // 边界检查
+                                    const before = pos > 0 ? text.charAt(pos - 1) : '';
+                                    const after = pos + original.length < text.length ? text.charAt(pos + original.length) : '';
+
+                                    // 前后都不能是数字
+                                    if (!/\d/.test(before) && !/\d/.test(after)) {
+                                        // 检查是否在【】内（防止嵌套脱敏）
+                                        if (!this.isInRedactedBrackets(text, pos)) {
+                                            tn.textContent = text.replace(new RegExp(this.escapeRegex(original), 'g'), replacement);
+                                            found = true;
+                                            break;  // 已替换，退出循环
                                         }
-                                        pos = text.indexOf(original, pos + 1);
                                     }
-                                    if (found) break;
+                                    pos = text.indexOf(original, pos + 1);
                                 }
                                 if (found) break;
                             }
-
-                            if (found) {
-                                processedIndices.add(rIdx);
-                            }
+                            if (found) break;
                         }
 
-                        // 策略2：只处理未在策略1中处理的项
-                        const unprocessedRedactions = sortedRedactions.filter((_, idx) => !processedIndices.has(idx));
-                        if (unprocessedRedactions.length > 0) {
-                            this.replaceAcrossRuns(para, unprocessedRedactions);
+                        if (found) {
+                            processedIndices.add(rIdx);
                         }
                     }
 
-                    // 序列化XML
-                    const serializer = new XMLSerializer();
-                    xml = serializer.serializeToString(doc);
+                    // 策略2：只处理未在策略1中处理的项
+                    const unprocessedRedactions = sortedRedactions.filter((_, idx) => !processedIndices.has(idx));
+                    if (unprocessedRedactions.length > 0) {
+                        this.replaceAcrossRuns(para, unprocessedRedactions);
+                    }
+                }
 
-                    // 替换 XML
-                    zip.file("word/document.xml", xml);
+                // 序列化XML
+                const serializer = new XMLSerializer();
+                xml = serializer.serializeToString(doc);
 
-                    // 生成并保存文件
-                    const blob = await zip.generateAsync({ type: "blob" });
-                    await saveBlobWithPicker(blob, this.file.name.replace(".docx", "_脱敏.docx"), {
+                // 替换 XML
+                zip.file("word/document.xml", xml);
+                return zip.generateAsync({ type: "blob" });
+            }
+
+            /**
+             * 导出docx文件
+             */
+            async exportDocx() {
+                try {
+                    const blob = await this.buildRedactedDocxBlob();
+                    await saveBlobWithPicker(blob, this.getRedactedDocxFileName(), {
                         types: [{
                             description: 'Word 文档',
                             accept: {
@@ -2977,7 +3036,12 @@
                 return lastOpen > lastClose;
             }
 
-            async exportMappingMD() {
+            getMappingFileName() {
+                const baseFileName = this.file.name.replace(/\.docx$/i, '');
+                return `${baseFileName}_mapping.md`;
+            }
+
+            buildMappingMarkdown() {
                 let md = `# 脱敏内容替换比对\n\n**文件**: ${this.file.name}\n**生成时间**: ${new Date().toLocaleString()}\n**脱敏项总数**: ${this.redactions.length}\n\n## 替换明细\n\n| 序号 | 原文 | 替换 | 类型 |\n|------|------|------|------|\n`;
                 this.redactions.forEach((r, i) => {
                     // 对邮箱类型的原文进行代码块包裹，防止markdown自动解析为链接
@@ -2989,11 +3053,37 @@
                     const typeName = r.type.startsWith('custom-') ? r.type.replace('custom-', '') : (TYPE_NAMES[r.type] || r.type);
                     md += `| ${i + 1} | ${original} | ${r.replacement} | ${typeName} |\n`;
                 });
+                return md;
+            }
 
-                // 使用docx文件名作为前缀，例如：合同.docx -> 合同_mapping.md
-                const baseFileName = this.file.name.replace(/\.docx$/i, '');
-                const mappingFileName = `${baseFileName}_mapping.md`;
-                await this.downloadFile(mappingFileName, md);
+            async exportCombinedZip() {
+                try {
+                    const docxBlob = await this.buildRedactedDocxBlob();
+                    const md = this.buildMappingMarkdown();
+                    const baseFileName = this.file.name.replace(/\.docx$/i, '');
+                    const bundle = new JSZip();
+
+                    bundle.file(this.getRedactedDocxFileName(), docxBlob);
+                    bundle.file(this.getMappingFileName(), md);
+
+                    const zipBlob = await bundle.generateAsync({ type: 'blob' });
+                    await saveBlobWithPicker(zipBlob, `${baseFileName}_导出结果.zip`, {
+                        types: [{
+                            description: 'ZIP 压缩包',
+                            accept: {
+                                'application/zip': ['.zip']
+                            }
+                        }]
+                    });
+                } catch (error) {
+                    console.error("导出ZIP失败:", error);
+                    alert("导出失败: " + error.message);
+                }
+            }
+
+            async exportMappingMD() {
+                const md = this.buildMappingMarkdown();
+                await this.downloadFile(this.getMappingFileName(), md);
             }
 
             async downloadFile(filename, content) {
@@ -3036,6 +3126,10 @@
                 document.getElementById('restoreResult').classList.add('hidden');
                 document.getElementById('restoreCount').textContent = '0';
                 document.getElementById('restoreRedactionCount').textContent = '0';
+                // 清空文件输入框，确保重置后可重复选择同一文件并触发解析
+                document.getElementById('fileInput').value = '';
+                document.getElementById('restoreFileInput').value = '';
+                document.getElementById('mappingFileInput').value = '';
                 this.file = null;
                 this.document = null;
                 this.redactions = [];
@@ -3119,7 +3213,11 @@
                 // 脱敏稿文件上传
                 const uploadArea = document.getElementById('restoreUploadArea');
                 const fileInput = document.getElementById('restoreFileInput');
-                uploadArea.onclick = () => fileInput.click();
+                uploadArea.onclick = () => {
+                    // 允许重复选择同一文件时也触发 change
+                    fileInput.value = '';
+                    fileInput.click();
+                };
                 uploadArea.ondragover = (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); };
                 uploadArea.ondragleave = () => uploadArea.classList.remove('dragover');
                 uploadArea.ondrop = (e) => { e.preventDefault(); uploadArea.classList.remove('dragover'); if (e.dataTransfer.files[0]) this.handleFile(e.dataTransfer.files[0]); };
@@ -3128,7 +3226,11 @@
                 // 比对.md文件上传
                 const mappingUploadArea = document.getElementById('mappingUploadArea');
                 const mappingFileInput = document.getElementById('mappingFileInput');
-                mappingUploadArea.onclick = () => mappingFileInput.click();
+                mappingUploadArea.onclick = () => {
+                    // 允许重复选择同一文件时也触发 change
+                    mappingFileInput.value = '';
+                    mappingFileInput.click();
+                };
                 mappingUploadArea.ondragover = (e) => { e.preventDefault(); mappingUploadArea.classList.add('dragover'); };
                 mappingUploadArea.ondragleave = () => mappingUploadArea.classList.remove('dragover');
                 mappingUploadArea.ondrop = (e) => { e.preventDefault(); mappingUploadArea.classList.remove('dragover'); if (e.dataTransfer.files[0]) this.handleMappingFile(e.dataTransfer.files[0]); };
@@ -3172,8 +3274,9 @@
 
                 try {
                     const mappingContent = await file.text();
-                    const parsedMapping = this.parseMapping(mappingContent);
-                    document.getElementById('restoreRedactionCount').textContent = Object.keys(parsedMapping).length;
+                    this.parseMapping(mappingContent);
+                    // 统一口径为命中次数，命中数需在执行还原时统计
+                    document.getElementById('restoreRedactionCount').textContent = '0';
                     document.getElementById('restoreCount').textContent = '0';
                     document.getElementById('restoreResult').classList.remove('hidden');
                 } catch (error) {
@@ -3250,7 +3353,7 @@
                     alert('未能从比对.md中解析出有效的替换映射，请检查格式');
                     return;
                 }
-                document.getElementById('restoreRedactionCount').textContent = Object.keys(this.mapping).length;
+                document.getElementById('restoreRedactionCount').textContent = '0';
 
                 try {
                     const arrayBuffer = await this.file.arrayBuffer();
@@ -3468,6 +3571,7 @@
                     });
 
                     // 显示结果
+                    document.getElementById('restoreRedactionCount').textContent = restoreCount;
                     document.getElementById('restoreCount').textContent = restoreCount;
                     document.getElementById('restoreResult').classList.remove('hidden');
 
