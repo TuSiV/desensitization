@@ -1,0 +1,20 @@
+{
+  "name": "desensitization-tool",
+  "version": "1.0.0",
+  "private": true,
+  "description": "文档脱敏处理工具 - Tauri 跨平台封装",
+  "scripts": {
+    "tauri": "tauri",
+    "build:web": "node ./scripts/build-web.mjs",
+    "dev": "npm run build:web && tauri dev",
+    "build:desktop": "tauri build",
+    "build:windows": "tauri build --bundles nsis",
+    "build:mac": "tauri build --bundles app,dmg",
+    "android:init": "tauri android init",
+    "android:dev": "npm run build:web && tauri android dev",
+    "build:android": "tauri android build --apk"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}

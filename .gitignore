@@ -1,0 +1,8 @@
+
+# Tauri build artifacts
+/src-tauri/target/
+/node_modules/
+/dist/
+/src-tauri/gen/
+/src-tauri/.cargo/
+/src-tauri/android/
