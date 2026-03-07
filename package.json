@@ -5,6 +5,7 @@
   "description": "文档脱敏处理工具 - Tauri 跨平台封装",
   "scripts": {
     "tauri": "tauri",
+    "icon:mac": "node ./scripts/generate-macos-dock-icon.mjs",
     "build:web": "node ./scripts/build-web.mjs",
     "dev": "npm run build:web && tauri dev",
     "build:desktop": "tauri build",

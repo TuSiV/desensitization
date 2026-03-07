@@ -33,6 +33,7 @@ npm run build:windows
 - macOS (`.app` + `.dmg`):
 
 ```bash
+npm run icon:mac
 npm run build:mac
 ```
 
