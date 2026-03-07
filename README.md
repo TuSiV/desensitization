@@ -12,7 +12,7 @@
 
 ## 📥 下载与安装
 
-由于 APK 安装包和编译产物不随源码上传，若您只需要使用该工具，请直接在仓库的 **[Releases](https://codeberg.org/tusiv/desensitization/releases)** 页面下载适用于您系统的可执行文件：
+由于 APK 安装包和编译产物不随源码上传，若您只需要使用该工具，请直接在仓库的 **[Releases](https://github.com/TuSiV/desensitization/releases)** 页面下载适用于您系统的可执行文件：
 
 - **Windows 用户**: 下载 `文件脱敏处理工具.exe`
 - **macOS 用户**: 下载 `文件脱敏处理工具.dmg`
