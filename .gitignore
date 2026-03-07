@@ -6,3 +6,9 @@
 /src-tauri/gen/
 /src-tauri/.cargo/
 /src-tauri/android/
+
+# Ignore release and sensitive files
+*.apk
+*.dmg
+*.exe
+.DS_Store
