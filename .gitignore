@@ -12,3 +12,14 @@
 *.dmg
 *.exe
 .DS_Store
+
+# Temporary process files
+tmp.iconset/
+tmp_app.iconset/
+tmp*.iconset/
+
+# Build artifacts and portable distributions
+windows-portable/
+
+# Key files
+*.keystore
