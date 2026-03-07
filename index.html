@@ -1331,10 +1331,15 @@
             return /Android/i.test(ua);
         }
 
+        function isTauriSaveSupported() {
+            return isTauriRuntime()
+                && !!(window.__TAURI__.dialog && typeof window.__TAURI__.dialog.save === 'function'
+                    && window.__TAURI__.fs && typeof window.__TAURI__.fs.writeFile === 'function');
+        }
+
         function isPickerSupported() {
             if (isTauriRuntime()) {
-                return !!(window.__TAURI__.dialog && typeof window.__TAURI__.dialog.save === 'function'
-                    && window.__TAURI__.fs && typeof window.__TAURI__.fs.writeFile === 'function');
+                return isTauriSaveSupported();
             }
             return typeof window.showSaveFilePicker === 'function';
         }
@@ -1407,8 +1412,15 @@
                 return false;
             }
 
-            const mimeType = getMimeTypeFromOptions(options);
-            const file = new File([blob], filename, { type: mimeType });
+            const mimeType = blob.type || getMimeTypeFromOptions(options);
+            const bytes = new Uint8Array(await blob.arrayBuffer());
+            if (bytes.byteLength === 0) {
+                console.warn(`Android 导出数据为空: ${filename}`);
+            }
+            const file = new File([bytes], filename, {
+                type: mimeType,
+                lastModified: Date.now()
+            });
 
             if (navigator.canShare && !navigator.canShare({ files: [file] })) {
                 return false;
@@ -1417,7 +1429,6 @@
             try {
                 await navigator.share({
                     title: '导出文件',
-                    text: `导出 ${filename}`,
                     files: [file]
                 });
                 return true;
@@ -1448,24 +1459,29 @@
         }
 
         async function saveBlobWithPicker(blob, filename, options = {}) {
+            if (isTauriSaveSupported()) {
+                try {
+                    const saved = await saveBlobByTauri(blob, filename, options);
+                    if (saved) {
+                        return true;
+                    }
+                    return false;
+                } catch (error) {
+                    if (!isAndroidTauriRuntime()) {
+                        console.warn('Tauri 保存失败，回退为默认下载:', error);
+                        return saveBlobByDownload(blob, filename);
+                    }
+                    console.warn('Android Tauri 保存失败，回退系统分享:', error);
+                }
+            }
+
             if (isAndroidTauriRuntime()) {
                 const shared = await saveBlobByAndroidShare(blob, filename, options);
                 if (shared) {
                     return true;
                 }
-                if (!isPickerSupported()) {
-                    alert('当前 Android 环境不支持直接下载，请使用系统分享面板保存文件。');
-                    return false;
-                }
-            }
-
-            if (isTauriRuntime() && isPickerSupported()) {
-                try {
-                    return await saveBlobByTauri(blob, filename, options);
-                } catch (error) {
-                    console.warn('Tauri 保存失败，回退为默认下载:', error);
-                    return saveBlobByDownload(blob, filename);
-                }
+                alert('Android 导出失败：请重试并选择支持文件保存的分享目标。');
+                return false;
             }
 
             const pickerOptions = {
@@ -2851,7 +2867,10 @@
 
                 // 替换 XML
                 zip.file("word/document.xml", xml);
-                return zip.generateAsync({ type: "blob" });
+                const bytes = await zip.generateAsync({ type: "uint8array" });
+                return new Blob([bytes], {
+                    type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                });
             }
 
             /**
@@ -3062,11 +3081,13 @@
                     const md = this.buildMappingMarkdown();
                     const baseFileName = this.file.name.replace(/\.docx$/i, '');
                     const bundle = new JSZip();
+                    const docxBytes = new Uint8Array(await docxBlob.arrayBuffer());
 
-                    bundle.file(this.getRedactedDocxFileName(), docxBlob);
+                    bundle.file(this.getRedactedDocxFileName(), docxBytes, { binary: true });
                     bundle.file(this.getMappingFileName(), md);
 
-                    const zipBlob = await bundle.generateAsync({ type: 'blob' });
+                    const zipBytes = await bundle.generateAsync({ type: 'uint8array' });
+                    const zipBlob = new Blob([zipBytes], { type: 'application/zip' });
                     await saveBlobWithPicker(zipBlob, `${baseFileName}_导出结果.zip`, {
                         types: [{
                             description: 'ZIP 压缩包',
@@ -3560,7 +3581,10 @@
                     zip.file("word/document.xml", xml);
 
                     // 生成并保存文件
-                    const blob = await zip.generateAsync({ type: "blob" });
+                    const bytes = await zip.generateAsync({ type: "uint8array" });
+                    const blob = new Blob([bytes], {
+                        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    });
                     await saveBlobWithPicker(blob, this.file.name.replace(".docx", "_还原.docx"), {
                         types: [{
                             description: 'Word 文档',
