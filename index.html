@@ -1443,19 +1443,37 @@
 
         async function saveBlobByTauri(blob, filename, options = {}) {
             const { dialog, fs } = window.__TAURI__;
+            console.log('开始 Tauri 文件保存流程...');
+            console.log('文件名:', filename);
+            
             const savePath = await dialog.save({
                 title: '导出文件',
                 defaultPath: filename,
                 filters: normalizeTauriFilters(options)
             });
 
+            console.log('用户选择的保存路径:', savePath);
+
             if (!savePath) {
+                console.log('用户取消了保存');
                 return false;
             }
 
-            const bytes = new Uint8Array(await blob.arrayBuffer());
-            await fs.writeFile(savePath, bytes);
-            return true;
+            try {
+                const arrayBuffer = await blob.arrayBuffer();
+                const bytes = new Uint8Array(arrayBuffer);
+                console.log('文件数据大小:', bytes.length, 'bytes');
+                
+                // Tauri v2: 直接写入绝对路径
+                await fs.writeFile(savePath, bytes);
+                console.log('文件保存成功:', savePath);
+                return true;
+            } catch (error) {
+                console.error('Tauri writeFile 错误:', error);
+                console.error('错误详情:', error.message || error);
+                alert('文件保存失败: ' + (error.message || error));
+                return false;
+            }
         }
 
         async function saveBlobWithPicker(blob, filename, options = {}) {
